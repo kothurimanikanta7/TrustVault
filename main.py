@@ -134,3 +134,42 @@ def view_audit_trail(current_user: dict = Depends(get_current_user)):
     return logs
 
 init_db()
+@app.post("/api/documents/{document_id}/permissions")
+def grant_permission(document_id: str, target_user_id: str, access_type: str, current_user: dict = Depends(get_current_user)):
+    """Allows Owners to share document access with standard Viewers."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT owner_id FROM documents WHERE id = ?", (document_id,))
+    doc = cursor.fetchone()
+    
+    if not doc or doc[0] != current_user["id"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only the document owner can share access.")
+        
+    cursor.execute(
+        "INSERT OR REPLACE INTO permissions (document_id, user_id, access_type) VALUES (?, ?, ?)",
+        (document_id, target_user_id, access_type)
+    )
+    conn.commit()
+    conn.close()
+    write_audit_log(current_user["id"], f"GRANTED_{access_type.upper()}_TO_{target_user_id}", document_id, "SUCCESS")
+    return {"message": "Access permission saved successfully."}
+
+@app.delete("/api/documents/{document_id}/permissions/{user_id}")
+def revoke_permission(document_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
+    """Allows Owners to revoke access instantly."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT owner_id FROM documents WHERE id = ?", (document_id,))
+    doc = cursor.fetchone()
+    
+    if not doc or doc[0] != current_user["id"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only the document owner can revoke access.")
+        
+    cursor.execute("DELETE FROM permissions WHERE document_id = ? AND user_id = ?", (document_id, user_id))
+    conn.commit()
+    conn.close()
+    write_audit_log(current_user["id"], f"REVOKED_ACCESS_FROM_{user_id}", document_id, "SUCCESS")
+    return {"message": "Access stripped. Authorization destroyed immediately."}
+
